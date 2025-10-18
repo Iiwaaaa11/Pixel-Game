@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Game World + Room + NPC Slime</title>
+  <style>
+    body { 
+      margin: 0; 
+      background: #111; 
+      display: flex; 
+      justify-content: center; 
+      align-items: center; 
+      height: 100vh; 
+      overflow: hidden;
+    }
+    canvas { background: #000; display: block; }
+  </style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<script>
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+
+// ===== Base Resolution =====
+const GAME_WIDTH = 800;
+const GAME_HEIGHT = 320;
+canvas.width = GAME_WIDTH;
+canvas.height = GAME_HEIGHT;
+
+// ===== Background World =====
+let bg = new Image();
+bg.src = "city_finished.png";  
+let bgX = 0;
+
+// ===== Background Room =====
+let roomBg = new Image();
+roomBg.src = "appart.jpg";
+
+// ===== Player =====
+let sprite = new Image();
+sprite.src = "karakter1.png";
+
+let frameWidth = 32, frameHeight = 32;
+let frameIndex = 0, frameCount = 4;
+
+let playerX = 100;
+let playerY = 245;
+
+let keys = {};
+let scrollSpeed = 10;
+let velocityY = 0, gravity = 1, jumpStrength = -8;
+let onGround = true;
+let facingRight = true;
+
+// ===== Train (NPC) =====
+let train = new Image();
+train.src = "train.png";
+let trainXWorld = 3000;     
+let trainY = 215;
+let trainSpeed = 2;
+let trainStopX = 1500;      
+let trainState = "enter";   
+let trainTimer = 0;
+
+// ===== Door (pisah world & room) =====
+let doorWorld = new Image();
+doorWorld.src = "open_door.png";
+let doorRoom = new Image();
+doorRoom.src = "open_door.png";
+
+let doorWorldWidth = 24;
+let doorWorldHeight = 32;
+let doorXWorld = 627; 
+let doorYWorld = 244;
+let nearDoorWorld = false;
+
+let doorRoomWidth = 34;
+let doorRoomHeight = 44;
+let doorRoomX = 665; 
+let doorRoomY = 152;
+let nearDoorRoom = false;
+
+// ===== Scene =====
+let scene = "world";
+
+// ===== Floor =====
+let floorYWorld = 245;
+let floorYRoom = 165;
+
+// ===== Batas Area Room =====
+const roomLeftLimit = 83;
+const roomRightLimit = 718;
+
+// ===== Transisi Fade =====
+let transitionAlpha = 0;
+let transitioning = false;
+let transitionDirection = null;
+
+// ===== Kontrol =====
+document.addEventListener("keydown", e => keys[e.key] = true);
+document.addEventListener("keyup", e => keys[e.key] = false);
+
+// =========================================================
+// =============== NPC SLIME (ANIMASI + GERAK) =============
+// =========================================================
+let slimeSprite = new Image();
+slimeSprite.src = "slime1.png"; // pastikan nama file sesuai
+
+let slimeFrame = 0;
+let slimeFrameDelay = 0;
+let slimeFrameCount = 8;
+let slimeWidth = 167;   // per frame (1338px / 8)
+let slimeHeight = 149;  // tinggi gambar asli
+
+let slimeXWorld = 100;  // posisi di dunia
+let slimeY = 241;       // sedikit di atas lantai
+let slimeDirection = -1;
+let slimeSpeed = 0.6;
+let slimeMoveTimer = 0;
+let slimeMoveDuration = 120; // durasi sebelum ubah arah
+
+function updateSlime() {
+  // animasi frame
+  slimeFrameDelay++;
+  if (slimeFrameDelay > 8) {
+    slimeFrame = (slimeFrame + 1) % slimeFrameCount;
+    slimeFrameDelay = 0;
+  }
+
+  // gerakan acak maju mundur
+  slimeMoveTimer++;
+  if (slimeMoveTimer > slimeMoveDuration) {
+    slimeDirection *= -1;
+    slimeMoveTimer = 0;
+  }
+
+  slimeXWorld += slimeDirection * slimeSpeed;
+
+  // batas area jalan slime
+  if (slimeXWorld < 100) slimeDirection = 1;
+  if (slimeXWorld > 700) slimeDirection = -1;
+}
+
+function drawSlime(cameraX) {
+  ctx.save();
+  const drawWidth = slimeWidth / 3;
+  const drawHeight = slimeHeight / 3;
+  if (slimeDirection === 1) {
+    ctx.scale(-1, 1);
+    ctx.drawImage(
+      slimeSprite,
+      slimeFrame * slimeWidth, 0, slimeWidth, slimeHeight,
+      -(slimeXWorld - cameraX) - drawWidth, slimeY, drawWidth, drawHeight
+    );
+  } else {
+    ctx.drawImage(
+      slimeSprite,
+      slimeFrame * slimeWidth, 0, slimeWidth, slimeHeight,
+      slimeXWorld - cameraX, slimeY, drawWidth, drawHeight
+    );
+  }
+  ctx.restore();
+}
+
+// =========================================================
+
+// ===== Update World =====
+function updateWorld() {
+  if (keys["ArrowRight"]) {
+    facingRight = true;
+    frameIndex = (frameIndex + 1) % frameCount;
+    if (playerX >= GAME_WIDTH/2 && bgX > -(bg.width - GAME_WIDTH)) {
+      bgX -= scrollSpeed;
+    } else if (playerX < GAME_WIDTH - frameWidth) {
+      playerX += scrollSpeed;
+    }
+  }
+
+  if (keys["ArrowLeft"]) {
+    facingRight = false;
+    frameIndex = (frameIndex + 1) % frameCount;
+    if (playerX <= GAME_WIDTH/2 && bgX < 0) {
+      bgX += scrollSpeed;
+    } else if (playerX > 0) {
+      playerX -= scrollSpeed;
+    }
+  }
+
+  if (keys[" "] && onGround) {
+    velocityY = jumpStrength;
+    onGround = false;
+  }
+
+  playerY += velocityY;
+  velocityY += gravity;
+  if (playerY >= floorYWorld) {
+    playerY = floorYWorld;
+    velocityY = 0;
+    onGround = true;
+  }
+
+  // ==== Train Logic ====
+  if (trainState === "enter") {
+    trainXWorld -= trainSpeed;
+    if (trainXWorld <= trainStopX) {
+      trainState = "stop";
+      trainTimer = 0;
+    }
+  } else if (trainState === "stop") {
+    trainTimer++;
+    if (trainTimer > 180) trainState = "exit";
+  } else if (trainState === "exit") {
+    trainXWorld += trainSpeed;
+    if (trainXWorld > 3000) {
+      trainState = "enter";
+      trainXWorld = 3000;
+    }
+  }
+
+  // ==== Update Slime ====
+  updateSlime();
+
+  // ==== Door World → Room ====
+  let cameraX = -bgX;
+  let doorXScreen = doorXWorld - cameraX;
+  nearDoorWorld = (
+    playerX < doorXScreen + doorWorldWidth &&
+    playerX + frameWidth > doorXScreen &&
+    playerY < doorYWorld + doorWorldHeight &&
+    playerY + frameHeight > doorYWorld
+  );
+
+  if (nearDoorWorld && keys["ArrowUp"] && !transitioning) {
+    startTransition("toRoom");
+  }
+}
+
+// ===== Update Room =====
+function updateRoom() {
+  if (keys["ArrowRight"]) {
+    facingRight = true;
+    frameIndex = (frameIndex + 1) % frameCount;
+    playerX += scrollSpeed;
+  }
+  if (keys["ArrowLeft"]) {
+    facingRight = false;
+    frameIndex = (frameIndex + 1) % frameCount;
+    playerX -= scrollSpeed;
+  }
+
+  if (playerX < roomLeftLimit) playerX = roomLeftLimit;
+  if (playerX > roomRightLimit - frameWidth) playerX = roomRightLimit - frameWidth;
+
+  if (keys[" "] && onGround) {
+    velocityY = jumpStrength;
+    onGround = false;
+  }
+
+  playerY += velocityY;
+  velocityY += gravity;
+  if (playerY >= floorYRoom) {
+    playerY = floorYRoom;
+    velocityY = 0;
+    onGround = true;
+  }
+
+  nearDoorRoom = (
+    playerX < doorRoomX + doorRoomWidth &&
+    playerX + frameWidth > doorRoomX &&
+    playerY < doorRoomY + doorRoomHeight &&
+    playerY + frameHeight > doorRoomY
+  );
+
+  if (nearDoorRoom && keys["ArrowUp"] && !transitioning) {
+    startTransition("toWorld");
+  }
+}
+
+// ===== Transisi Scene =====
+function startTransition(direction) {
+  transitioning = true;
+  transitionDirection = direction;
+  transitionAlpha = 0;
+}
+
+function updateTransition() {
+  if (!transitioning) return;
+
+  transitionAlpha += 0.05;
+  if (transitionAlpha >= 1) {
+    if (transitionDirection === "toRoom") {
+      scene = "room";
+      playerX = doorRoomX + doorRoomWidth + 5;
+      playerY = floorYRoom;
+    } 
+    else if (transitionDirection === "toWorld") {
+      scene = "world";
+      let cameraX = -bgX;
+      playerX = (doorXWorld - cameraX) + doorWorldWidth + 5;
+      playerY = floorYWorld;
+    }
+    transitionDirection = null;
+  }
+
+  if (transitionAlpha >= 2) {
+    transitioning = false;
+    transitionAlpha = 0;
+  }
+}
+
+// ===== Draw World =====
+function drawWorld() {
+  ctx.clearRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+  ctx.drawImage(bg, bgX, 0);
+
+  let cameraX = -bgX;
+  ctx.drawImage(train, trainXWorld - cameraX, trainY);
+  drawSlime(cameraX); // gambar slime di world
+
+  ctx.drawImage(doorWorld, doorXWorld - cameraX, doorYWorld, doorWorldWidth, doorWorldHeight);
+
+  if (nearDoorWorld) {
+    ctx.strokeStyle = "yellow";
+    ctx.strokeRect(doorXWorld - cameraX, doorYWorld, doorWorldWidth, doorWorldHeight);
+  }
+
+  drawPlayer();
+}
+
+// ===== Draw Room =====
+function drawRoom() {
+  ctx.clearRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+
+  let newWidth = 650;
+  let newHeight = 120;
+  let offsetX = (GAME_WIDTH - newWidth) / 2;
+  let offsetY = GAME_HEIGHT - newHeight - 100;
+
+  ctx.drawImage(roomBg, offsetX, offsetY, newWidth, newHeight);
+  ctx.drawImage(doorRoom, doorRoomX, doorRoomY, doorRoomWidth, doorRoomHeight);
+
+  if (nearDoorRoom) {
+    ctx.strokeStyle = "yellow";
+    ctx.strokeRect(doorRoomX, doorRoomY, doorRoomWidth, doorRoomHeight);
+  }
+
+  drawPlayer();
+}
+
+// ===== Draw Player =====
+function drawPlayer() {
+  if (facingRight) {
+    ctx.drawImage(sprite, frameIndex * frameWidth, 0, frameWidth, frameHeight,
+      playerX, playerY, frameWidth, frameHeight);
+  } else {
+    ctx.save();
+    ctx.scale(-1, 1);
+    ctx.drawImage(sprite, frameIndex * frameWidth, 0, frameWidth, frameHeight,
+      -playerX - frameWidth, playerY, frameWidth, frameHeight);
+    ctx.restore();
+  }
+}
+
+// ===== Loop =====
+function loop() {
+  if (scene === "world") {
+    updateWorld();
+    drawWorld();
+  } else if (scene === "room") {
+    updateRoom();
+    drawRoom();
+  }
+
+  updateTransition();
+
+  if (transitioning) {
+    let alpha = Math.min(transitionAlpha, 1);
+    if (transitionAlpha > 1) alpha = 2 - transitionAlpha; 
+    ctx.fillStyle = `rgba(0, 0, 0, ${alpha})`;
+    ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+  }
+
+  requestAnimationFrame(loop);
+}
+
+bg.onload = () => loop();
+
+// ===== Responsive Scaling =====
+function resizeCanvas() {
+  let scale = Math.min(window.innerWidth / GAME_WIDTH, window.innerHeight / GAME_HEIGHT);
+  canvas.style.width = GAME_WIDTH * scale + "px";
+  canvas.style.height = GAME_HEIGHT * scale + "px";
+}
+window.addEventListener("resize", resizeCanvas);
+resizeCanvas();
+</script>
+</body>
+</html>
