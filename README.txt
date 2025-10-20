@@ -22,6 +22,5 @@ Game ini dirancang sebagai proyek latihan untuk memahami **animasi sprite**, **i
 ---
 
 ## 🕹️ Cara Menjalankan
-1. Clone repository ini:
-   ```bash
-   git clone https://github.com/iiwaaaa11/Pixel-Game.git
+   https://iiwaaaa11.github.io/Pixel-Game/
+
